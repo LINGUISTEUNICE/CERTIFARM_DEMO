@@ -1085,10 +1085,39 @@
     }
   }
 
-  // ---------------- QR rendering (genuine, scannable) ----------------
+  // ---------------- QR rendering (genuine, scannable, self-contained) ----------------
   var qrSeq = 0;
-  function traceUrl(labelId){
-    return location.origin + location.pathname + "?trace=" + encodeURIComponent(labelId);
+
+  // Builds the full trace snapshot for a label — this whole object gets embedded
+  // in the QR link so any device can render it with zero local data.
+  function buildTracePayload(label){
+    var pool = poolById(label.poolId);
+    var lots = pool.harvestIds.map(harvestById).filter(Boolean);
+    var farmers = lots.map(function(h){return farmerById(h.farmerId);}).filter(Boolean);
+    var uniqueFarmers = [];
+    farmers.forEach(function(f){ if(!uniqueFarmers.some(function(u){return u.id===f.id;})) uniqueFarmers.push(f); });
+    var totalKg = lots.reduce(function(s,h){return s+Number(h.qty||0);},0);
+    return {
+      id: label.id,
+      retailer: label.retailer,
+      date: label.date,
+      kg: totalKg,
+      farmers: uniqueFarmers.map(function(f){
+        return {
+          name: f.name,
+          community: f.community,
+          crop: f.crop,
+          verifier: f.verifier,
+          verifiedDate: f.verifiedDate,
+          stages: growthByFarmer(f.id).sort(function(a,b){return a.date<b.date?-1:1;}).map(function(g){return g.stage;})
+        };
+      })
+    };
+  }
+
+  function traceUrl(label){
+    var payload = buildTracePayload(label);
+    return location.origin + location.pathname + "?data=" + encodeURIComponent(JSON.stringify(payload));
   }
 
   function renderQrInto(containerEl, text, size){
@@ -1163,7 +1192,7 @@
       // render each QR after markup is in the DOM
       var cards = state.labels.slice().reverse();
       Array.prototype.forEach.call(list.querySelectorAll(".qr"), function(box, idx){
-        renderQrInto(box, traceUrl(cards[idx].id), 88);
+        renderQrInto(box, traceUrl(cards[idx]), 88);
       });
       Array.prototype.forEach.call(list.querySelectorAll("[data-trace]"), function(btn){
         btn.addEventListener("click", function(){
@@ -1181,7 +1210,7 @@
     var labelOptions = state.labels.map(function(l){ return {id:l.id, label:l.id}; });
     el.innerHTML =
       '<h2>Trace a label</h2>'+
-      '<p class="sub">This is the moment a shopper gets at the point of sale: scan a code, see exactly who grew it and who vouched for them.</p>'+
+      '<p class="sub">This is the moment a shopper gets at the point of sale: scan a code, see exactly who grew it and who vouched for them — the details are carried inside the code, so it works even on a phone that has never opened this app before.</p>'+
       '<div class="trace-search">'+
         '<input id="s-input" list="label-ids" type="text" placeholder="Enter a label ID, e.g. CF-2026-AB12">'+
         '<datalist id="label-ids">'+ labelOptions.map(function(o){return '<option value="'+esc(o.label)+'">';}).join("") +'</datalist>'+
@@ -1210,34 +1239,36 @@
     if(!code){ result.innerHTML = '<div class="empty">Enter a label ID above.</div>'; return; }
     var label = labelById(code);
     if(!label){
-      result.innerHTML = '<div class="empty">No record for "'+esc(code)+'". Check the code, or issue a label first.</div>';
+      result.innerHTML = '<div class="empty">No record for "'+esc(code)+'" in this browser\'s ledger. Check the code, or issue a label first.</div>';
       return;
     }
-    var pool = poolById(label.poolId);
-    var lots = pool.harvestIds.map(harvestById).filter(Boolean);
-    var farmers = lots.map(function(h){return farmerById(h.farmerId);}).filter(Boolean);
-    var uniqueFarmers = [];
-    farmers.forEach(function(f){ if(!uniqueFarmers.some(function(u){return u.id===f.id;})) uniqueFarmers.push(f); });
-    var totalKg = lots.reduce(function(s,h){return s+Number(h.qty||0);},0);
+    renderTraceResult(buildTracePayload(label), label);
+  }
+
+  // Renders the trace card from a plain data object — used both for a local
+  // lookup (has the real `label` for its own fresh QR) and for a link opened
+  // on a brand-new device, where the QR already carried everything needed.
+  function renderTraceResult(data, label){
+    var result = document.getElementById("s-result");
+    if(!result) return;
+    var farmers = data.farmers || [];
 
     result.innerHTML =
       '<div class="trace-result">'+
-        '<div class="trace-head"><div><div class="id">'+label.id+'</div><div class="meta">'+esc(label.retailer)+'</div></div>'+
-          '<div><div class="qr" id="trace-qr"></div><div class="qr-note">this label\'s live link</div></div></div>'+
+        '<div class="trace-head"><div><div class="id">'+esc(data.id)+'</div><div class="meta">'+esc(data.retailer)+'</div></div>'+
+          (label ? '<div><div class="qr" id="trace-qr"></div><div class="qr-note">this label\'s live link</div></div>' : '')+
+        '</div>'+
         '<div class="trust-list">'+
           '<div class="trust-item"><span class="tick">✓</span> Verified by a peer group before harvest, not a paid inspector</div>'+
-          '<div class="trust-item"><span class="tick">✓</span> Batch traced to '+uniqueFarmers.length+' named farmer(s), '+totalKg+' kg total</div>'+
+          '<div class="trust-item"><span class="tick">✓</span> Batch traced to '+farmers.length+' named farmer(s), '+data.kg+' kg total</div>'+
           '<div class="trust-item"><span class="tick">✓</span> Every hand-off logged from farm gate to this stall</div>'+
         '</div>'+
         '<div class="section-title" style="margin-top:0;">Farmers in this batch</div>'+
-        uniqueFarmers.map(function(f){
-          var logs = growthByFarmer(f.id).sort(function(a,b){return a.date<b.date?-1:1;});
+        farmers.map(function(f){
           return '<div class="farm-card"><div class="name">'+esc(f.name)+'</div>'+
             '<div class="meta">'+esc(f.community)+' · grows '+esc(f.crop)+' · vouched by '+esc(f.verifier)+' on '+fmtDate(f.verifiedDate)+'</div>'+
-            (logs.length ? '<div class="grow-strip">'+ logs.map(function(g){
-              return g.photo
-                ? '<img class="grow-thumb" src="'+g.photo+'" title="'+esc(g.stage)+' · '+fmtDate(g.date)+'" alt="'+esc(g.stage)+'">'
-                : '<div class="grow-thumb placeholder" title="'+esc(g.stage)+' · '+fmtDate(g.date)+'">🌱</div>';
+            (f.stages && f.stages.length ? '<div class="grow-strip">'+ f.stages.map(function(s){
+              return '<div class="grow-thumb placeholder" title="'+esc(s)+'">🌱</div>';
             }).join("") +'</div>' : '')+
           '</div>';
         }).join("")+
@@ -1245,12 +1276,14 @@
           '<span class="hop">Farmer</span><span class="arrow">→</span>'+
           '<span class="hop">Aggregator</span><span class="arrow">→</span>'+
           '<span class="hop">Transporter</span><span class="arrow">→</span>'+
-          '<span class="hop">'+esc(label.retailer)+'</span><span class="arrow">→</span>'+
+          '<span class="hop">'+esc(data.retailer)+'</span><span class="arrow">→</span>'+
           '<span class="hop">You</span>'+
         '</div>'+
       '</div>';
 
-    renderQrInto(document.getElementById("trace-qr"), traceUrl(label.id), 88);
+    if(label){
+      renderQrInto(document.getElementById("trace-qr"), traceUrl(label), 88);
+    }
   }
 
   // ---------------- boot ----------------
@@ -1264,16 +1297,23 @@
 
   loadState().then(function(){
     var params = new URLSearchParams(location.search);
-    var traceParam = params.get("trace");
-    if(traceParam){
+    var dataParam = params.get("data");
+    if(dataParam){
       mode = "operator";
       current = "scan";
       Array.prototype.forEach.call(document.querySelectorAll(".mode-btn"), function(b){
         b.classList.toggle("active", b.getAttribute("data-mode")==="operator");
       });
       renderAll();
-      var input = document.getElementById("s-input");
-      if(input){ input.value = traceParam; runTrace(traceParam); }
+      try{
+        var payload = JSON.parse(dataParam);
+        var input = document.getElementById("s-input");
+        if(input){ input.value = payload.id; }
+        renderTraceResult(payload, null);
+      }catch(e){
+        var result = document.getElementById("s-result");
+        if(result){ result.innerHTML = '<div class="empty">This link\'s trace data couldn\'t be read.</div>'; }
+      }
     }
   });
 

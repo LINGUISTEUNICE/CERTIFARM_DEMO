@@ -317,7 +317,7 @@
   }
   .qr{
     flex:none;
-    width:88px;height:88px;
+    width:130px;height:130px;
     background:var(--card);
     border-radius:4px;
     display:flex;align-items:center;justify-content:center;
@@ -1097,19 +1097,22 @@
     var uniqueFarmers = [];
     farmers.forEach(function(f){ if(!uniqueFarmers.some(function(u){return u.id===f.id;})) uniqueFarmers.push(f); });
     var totalKg = lots.reduce(function(s,h){return s+Number(h.qty||0);},0);
+    // Short keys and capped stage lists keep the embedded QR payload small,
+    // since a bulky payload forces a dense, harder-to-scan code.
     return {
       id: label.id,
-      retailer: label.retailer,
-      date: label.date,
+      r: label.retailer,
+      d: label.date,
       kg: totalKg,
-      farmers: uniqueFarmers.map(function(f){
+      f: uniqueFarmers.map(function(f){
+        var stages = growthByFarmer(f.id).sort(function(a,b){return a.date<b.date?-1:1;}).map(function(g){return g.stage;});
         return {
-          name: f.name,
-          community: f.community,
-          crop: f.crop,
-          verifier: f.verifier,
-          verifiedDate: f.verifiedDate,
-          stages: growthByFarmer(f.id).sort(function(a,b){return a.date<b.date?-1:1;}).map(function(g){return g.stage;})
+          n: f.name,
+          c: f.community,
+          p: f.crop,
+          v: f.verifier,
+          vd: f.verifiedDate,
+          s: stages.slice(-3) // most recent 3 stages only
         };
       })
     };
@@ -1129,9 +1132,13 @@
           text:text,
           width:size||84,
           height:size||84,
+          typeNumber:0, // 0 = auto-pick the smallest QR version that fits the data;
+                        // a fixed type (the library's default) silently fails on
+                        // anything longer than ~50 bytes, which is what broke scanning
           colorDark:"#1D2419",
           colorLight:"#F6F7EE",
-          correctLevel: QRCode.CorrectLevel.M
+          correctLevel: QRCode.CorrectLevel.L // lower redundancy = more room for data;
+                                               // fine since this is scanned off a screen, not print
         });
         return;
       }catch(e){ /* fall through to fallback */ }
@@ -1192,7 +1199,7 @@
       // render each QR after markup is in the DOM
       var cards = state.labels.slice().reverse();
       Array.prototype.forEach.call(list.querySelectorAll(".qr"), function(box, idx){
-        renderQrInto(box, traceUrl(cards[idx]), 88);
+        renderQrInto(box, traceUrl(cards[idx]), 130);
       });
       Array.prototype.forEach.call(list.querySelectorAll("[data-trace]"), function(btn){
         btn.addEventListener("click", function(){
@@ -1251,11 +1258,12 @@
   function renderTraceResult(data, label){
     var result = document.getElementById("s-result");
     if(!result) return;
-    var farmers = data.farmers || [];
+    var farmers = data.f || [];
+    var retailer = data.r;
 
     result.innerHTML =
       '<div class="trace-result">'+
-        '<div class="trace-head"><div><div class="id">'+esc(data.id)+'</div><div class="meta">'+esc(data.retailer)+'</div></div>'+
+        '<div class="trace-head"><div><div class="id">'+esc(data.id)+'</div><div class="meta">'+esc(retailer)+'</div></div>'+
           (label ? '<div><div class="qr" id="trace-qr"></div><div class="qr-note">this label\'s live link</div></div>' : '')+
         '</div>'+
         '<div class="trust-list">'+
@@ -1265,10 +1273,10 @@
         '</div>'+
         '<div class="section-title" style="margin-top:0;">Farmers in this batch</div>'+
         farmers.map(function(f){
-          return '<div class="farm-card"><div class="name">'+esc(f.name)+'</div>'+
-            '<div class="meta">'+esc(f.community)+' · grows '+esc(f.crop)+' · vouched by '+esc(f.verifier)+' on '+fmtDate(f.verifiedDate)+'</div>'+
-            (f.stages && f.stages.length ? '<div class="grow-strip">'+ f.stages.map(function(s){
-              return '<div class="grow-thumb placeholder" title="'+esc(s)+'">🌱</div>';
+          return '<div class="farm-card"><div class="name">'+esc(f.n)+'</div>'+
+            '<div class="meta">'+esc(f.c)+' · grows '+esc(f.p)+' · vouched by '+esc(f.v)+' on '+fmtDate(f.vd)+'</div>'+
+            (f.s && f.s.length ? '<div class="grow-strip">'+ f.s.map(function(stage){
+              return '<div class="grow-thumb placeholder" title="'+esc(stage)+'">🌱</div>';
             }).join("") +'</div>' : '')+
           '</div>';
         }).join("")+
@@ -1276,13 +1284,13 @@
           '<span class="hop">Farmer</span><span class="arrow">→</span>'+
           '<span class="hop">Aggregator</span><span class="arrow">→</span>'+
           '<span class="hop">Transporter</span><span class="arrow">→</span>'+
-          '<span class="hop">'+esc(data.retailer)+'</span><span class="arrow">→</span>'+
+          '<span class="hop">'+esc(retailer)+'</span><span class="arrow">→</span>'+
           '<span class="hop">You</span>'+
         '</div>'+
       '</div>';
 
     if(label){
-      renderQrInto(document.getElementById("trace-qr"), traceUrl(label), 88);
+      renderQrInto(document.getElementById("trace-qr"), traceUrl(label), 130);
     }
   }
 

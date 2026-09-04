@@ -1087,6 +1087,10 @@
 
   // ---------------- QR rendering (genuine, scannable) ----------------
   var qrSeq = 0;
+  function traceUrl(labelId){
+    return location.origin + location.pathname + "?trace=" + encodeURIComponent(labelId);
+  }
+
   function renderQrInto(containerEl, text, size){
     if(!containerEl) return;
     containerEl.innerHTML = "";
@@ -1117,7 +1121,7 @@
 
     el.innerHTML =
       '<h2>Issue a label</h2>'+
-      '<p class="sub">A retailer licenses a label for a batch. The QR below is genuine and scannable — it encodes the label ID. In production it would deep-link to the live trace page.</p>'+
+      '<p class="sub">A retailer licenses a label for a batch. The QR below is genuine and scannable — it links straight to this label\'s trace page on this deployment.</p>'+
       (labelable.length===0
         ? '<div class="empty">'+(state.pools.length===0 ? "Pool some harvest lots first." : "Every batch already has a label.")+'</div>'
         : '<div class="grid-form">'+
@@ -1151,7 +1155,7 @@
       list.innerHTML = state.labels.slice().reverse().map(function(l){
         var boxId = "qr-" + (qrSeq++);
         return '<div class="label-card" style="margin-bottom:10px;">'+
-          '<div><div class="qr" id="'+boxId+'"></div><div class="qr-note">encodes '+esc(l.id)+'</div></div>'+
+          '<div><div class="qr" id="'+boxId+'"></div><div class="qr-note">opens this label\'s trace page</div></div>'+
           '<div><div class="id">'+l.id+'</div><div class="desc">'+esc(l.retailer)+' · issued '+fmtDate(l.date)+'</div>'+
           '<button class="ghost-btn" style="margin-top:8px;" data-trace="'+l.id+'">Trace this label →</button></div>'+
         '</div>';
@@ -1159,7 +1163,7 @@
       // render each QR after markup is in the DOM
       var cards = state.labels.slice().reverse();
       Array.prototype.forEach.call(list.querySelectorAll(".qr"), function(box, idx){
-        renderQrInto(box, cards[idx].id, 88);
+        renderQrInto(box, traceUrl(cards[idx].id), 88);
       });
       Array.prototype.forEach.call(list.querySelectorAll("[data-trace]"), function(btn){
         btn.addEventListener("click", function(){
@@ -1219,7 +1223,7 @@
     result.innerHTML =
       '<div class="trace-result">'+
         '<div class="trace-head"><div><div class="id">'+label.id+'</div><div class="meta">'+esc(label.retailer)+'</div></div>'+
-          '<div><div class="qr" id="trace-qr"></div><div class="qr-note">encodes '+esc(label.id)+'</div></div></div>'+
+          '<div><div class="qr" id="trace-qr"></div><div class="qr-note">this label\'s live link</div></div></div>'+
         '<div class="trust-list">'+
           '<div class="trust-item"><span class="tick">✓</span> Verified by a peer group before harvest, not a paid inspector</div>'+
           '<div class="trust-item"><span class="tick">✓</span> Batch traced to '+uniqueFarmers.length+' named farmer(s), '+totalKg+' kg total</div>'+
@@ -1246,7 +1250,7 @@
         '</div>'+
       '</div>';
 
-    renderQrInto(document.getElementById("trace-qr"), label.id, 88);
+    renderQrInto(document.getElementById("trace-qr"), traceUrl(label.id), 88);
   }
 
   // ---------------- boot ----------------
@@ -1258,7 +1262,20 @@
     });
   });
 
-  loadState();
+  loadState().then(function(){
+    var params = new URLSearchParams(location.search);
+    var traceParam = params.get("trace");
+    if(traceParam){
+      mode = "operator";
+      current = "scan";
+      Array.prototype.forEach.call(document.querySelectorAll(".mode-btn"), function(b){
+        b.classList.toggle("active", b.getAttribute("data-mode")==="operator");
+      });
+      renderAll();
+      var input = document.getElementById("s-input");
+      if(input){ input.value = traceParam; runTrace(traceParam); }
+    }
+  });
 
 })();
 </script>
